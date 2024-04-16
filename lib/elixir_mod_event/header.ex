@@ -20,37 +20,37 @@ defmodule FSModEvent.Header do
   Given a line terminated in \n tries to parse a header in the form:
   Key: Value\n
   """
-  @spec parse(char_list) :: {String.t, String.t, char_list} | :error
-  def parse(char_list) do
-    char_list |> parse_key |> parse_value |> normalize
+  @spec parse(charlist) :: {String.t(), String.t(), charlist} | :error
+  def parse(charlist) do
+    charlist |> parse_key |> parse_value |> normalize
   end
 
-  defp parse_key(char_list) do
-    parse_key char_list, []
+  defp parse_key(charlist) do
+    parse_key(charlist, [])
   end
 
-  defp parse_key([c, ?:, 32|rest], acc) do
-    {Enum.reverse([c|acc]), rest}
+  defp parse_key([c, ?:, 32 | rest], acc) do
+    {Enum.reverse([c | acc]), rest}
   end
 
-  defp parse_key([c|rest], acc) do
-    parse_key rest, [c|acc]
+  defp parse_key([c | rest], acc) do
+    parse_key(rest, [c | acc])
   end
 
   defp parse_key(_, _), do: :error
 
   defp parse_value({key, rest}) do
-    parse_value {key, rest}, []
+    parse_value({key, rest}, [])
   end
 
   defp parse_value(error), do: error
 
-  defp parse_value({key, [?\n|rest]}, acc) do
+  defp parse_value({key, [?\n | rest]}, acc) do
     {key, Enum.reverse(acc), rest}
   end
 
-  defp parse_value({key, [c|rest]}, acc) do
-    parse_value {key, rest}, [c|acc]
+  defp parse_value({key, [c | rest]}, acc) do
+    parse_value({key, rest}, [c | acc])
   end
 
   defp parse_value(_, _), do: :error

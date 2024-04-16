@@ -17,28 +17,29 @@ defmodule FSModEvent.Packet do
   """
   alias FSModEvent.Header, as: Header
   alias FSModEvent.Content, as: Content
+
   defstruct type: nil,
-    success: false,
-    headers_complete: false,
-    payload_complete: false,
-    complete: false,
-    parse_error: false,
-    headers: %{},
-    length: 0,
-    rest: nil,
-    job_id: nil,
-    custom_payload: nil,
-    payload: nil
+            success: false,
+            headers_complete: false,
+            payload_complete: false,
+            complete: false,
+            parse_error: false,
+            headers: %{},
+            length: 0,
+            rest: nil,
+            job_id: nil,
+            custom_payload: nil,
+            payload: nil
 
   @type t :: %FSModEvent.Packet{}
 
   @doc """
   true if the given packet is a response to an issued command.
   """
-  @spec is_response?(FSModEvent.Packet.t) :: boolean
+  @spec is_response?(FSModEvent.Packet.t()) :: boolean
   def is_response?(pkt) do
     pkt.type === "api/response" or
-    pkt.type === "command/reply"
+      pkt.type === "command/reply"
   end
 
   @doc """
@@ -46,38 +47,43 @@ defmodule FSModEvent.Packet do
   buffer leftovers and the packets parsed.
   """
   @spec parse(
-    char_list, [FSModEvent.Packet.t]
-  ) :: {char_list, [FSModEvent.Packet.t]}
-  def parse(char_list, acc \\ []) do
-    pkt = parse_real char_list
+          charlist,
+          [FSModEvent.Packet.t()]
+        ) :: {charlist, [FSModEvent.Packet.t()]}
+  def parse(charlist, acc \\ []) do
+    pkt = parse_real(charlist)
+
     if pkt.parse_error or not pkt.complete do
-      {char_list, Enum.reverse acc}
+      {charlist, Enum.reverse(acc)}
     else
-      parse pkt.rest, [%FSModEvent.Packet{pkt | rest: nil} | acc]
+      parse(pkt.rest, [%FSModEvent.Packet{pkt | rest: nil} | acc])
     end
   end
 
   defp parse_real(data) do
     %FSModEvent.Packet{
-      rest: data,
-    } |> headers |> payload |> normalize
+      rest: data
+    }
+    |> headers
+    |> payload
+    |> normalize
   end
 
   defp headers(pkt = %FSModEvent.Packet{parse_error: false}) do
-    case Header.parse pkt.rest do
+    case Header.parse(pkt.rest) do
       {key, value, rest} ->
-        pkt = %FSModEvent.Packet{pkt |
-          headers: Map.put(pkt.headers, key, value)
-        }
+        pkt = %FSModEvent.Packet{pkt | headers: Map.put(pkt.headers, key, value)}
+
         case rest do
-          [?\n|rest] ->
-            %FSModEvent.Packet{pkt |
-              headers_complete: true,
-              rest: rest
-            }
-          _ -> headers %FSModEvent.Packet{pkt | rest: rest}
+          [?\n | rest] ->
+            %FSModEvent.Packet{pkt | headers_complete: true, rest: rest}
+
+          _ ->
+            headers(%FSModEvent.Packet{pkt | rest: rest})
         end
-      _error -> %FSModEvent.Packet{pkt | parse_error: true}
+
+      _error ->
+        %FSModEvent.Packet{pkt | parse_error: true}
     end
   end
 
@@ -85,30 +91,41 @@ defmodule FSModEvent.Packet do
     %FSModEvent.Packet{pkt | parse_error: true}
   end
 
-  defp payload(pkt = %FSModEvent.Packet{
-    parse_error: false,
-    headers: headers,
-    rest: rest
-  }) do
-    l = case headers["content-length"] do
-      nil -> 0
-      l ->
-        {l, ""} = Integer.parse l
-        l
-    end
-    {p, rest} = Enum.split rest, l
+  defp payload(
+         pkt = %FSModEvent.Packet{
+           parse_error: false,
+           headers: headers,
+           rest: rest
+         }
+       ) do
+    l =
+      case headers["content-length"] do
+        nil ->
+          0
+
+        l ->
+          {l, ""} = Integer.parse(l)
+          l
+      end
+
+    {p, rest} = Enum.split(rest, l)
+
     if length(p) === l do
       ctype = headers["content-type"]
-      {p, custom_payload} = case Content.parse ctype, p do
-        nil -> {"", ""}
-        r -> r
-      end
-      %FSModEvent.Packet{pkt |
-        payload_complete: true,
-        length: l,
-        payload: p,
-        custom_payload: custom_payload,
-        rest: rest
+
+      {p, custom_payload} =
+        case Content.parse(ctype, p) do
+          nil -> {"", ""}
+          r -> r
+        end
+
+      %FSModEvent.Packet{
+        pkt
+        | payload_complete: true,
+          length: l,
+          payload: p,
+          custom_payload: custom_payload,
+          rest: rest
       }
     else
       %FSModEvent.Packet{pkt | parse_error: true}
@@ -119,29 +136,32 @@ defmodule FSModEvent.Packet do
 
   defp normalize(pkt = %FSModEvent.Packet{parse_error: false}) do
     complete = pkt.headers_complete and pkt.payload_complete
-    job_id = case pkt.headers["reply-text"] do
-      nil -> if(is_map(pkt.payload) and not is_nil pkt.payload["job-uuid"]) do
-        pkt.payload["job-uuid"]
-      else
-        nil
+
+    job_id =
+      case pkt.headers["reply-text"] do
+        nil ->
+          if(is_map(pkt.payload) and not is_nil(pkt.payload["job-uuid"])) do
+            pkt.payload["job-uuid"]
+          else
+            nil
+          end
+
+        job_id ->
+          case Regex.run(~r/\+OK Job-UUID: (.*)$/, job_id) do
+            nil -> nil
+            [_, job_id] -> job_id
+          end
       end
-      job_id -> case Regex.run ~r/\+OK Job-UUID: (.*)$/, job_id do
-        nil -> nil
-        [_, job_id] -> job_id
+
+    success =
+      case pkt.headers["reply-text"] do
+        nil -> false
+        <<"+OK", _rest::binary>> -> true
+        _ -> false
       end
-    end
-    success = case pkt.headers["reply-text"] do
-      nil -> false
-      <<"+OK", _rest :: binary>> -> true
-      _ -> false
-    end
+
     ctype = pkt.headers["content-type"]
-    %FSModEvent.Packet{pkt |
-      complete: complete,
-      success: success,
-      job_id: job_id,
-      type: ctype
-    }
+    %FSModEvent.Packet{pkt | complete: complete, success: success, job_id: job_id, type: ctype}
   end
 
   defp normalize(pkt), do: pkt

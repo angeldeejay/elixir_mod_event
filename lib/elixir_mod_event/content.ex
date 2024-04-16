@@ -20,22 +20,25 @@ defmodule FSModEvent.Content do
   @doc """
   Will parse and return a payload according to the content type given.
   """
-  @spec parse(String.t, char_list) :: term
+  @spec parse(String.t(), charlist) :: term
   def parse("text/event-plain", data) do
-    event_plain data, %{}
+    event_plain(data, %{})
   end
 
   def parse(_, data), do: {data, nil}
 
   defp event_plain(data, acc) do
-    case Header.parse data do
+    case Header.parse(data) do
       {key, value, rest} ->
-        acc = Map.put acc, key, URI.decode_www_form(value)
+        acc = Map.put(acc, key, URI.decode_www_form(value))
+
         case rest do
-          [?\n|rest] -> {acc, rest}
-          _ -> event_plain rest, acc
+          [?\n | rest] -> {acc, rest}
+          _ -> event_plain(rest, acc)
         end
-      _error -> nil
+
+      _error ->
+        nil
     end
   end
 end
